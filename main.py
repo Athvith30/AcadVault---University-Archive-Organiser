@@ -1,6 +1,7 @@
 # main.py
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 from passlib.context import CryptContext
 import models
@@ -10,8 +11,46 @@ import shutil
 import json
 from typing import List, Optional, Union, Dict
 
-# Ensure all ORM tables (User, Faculty, AcademicYear, Regulation, Subject, FileVersion) exist
+# Ensure all ORM tables exist
 models.Base.metadata.create_all(bind=engine)
+
+REGULATION_EXTRA_COLUMNS = {
+    "year_1_sem_1_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_1_sem_2_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_2_sem_1_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_2_sem_2_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_3_sem_1_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_3_sem_2_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_4_sem_1_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "year_4_sem_2_teachers": "TEXT NOT NULL DEFAULT '[]'",
+    "subsequent_folders": "TEXT NOT NULL DEFAULT '[]'",
+    "subject_files": "TEXT NOT NULL DEFAULT '{}'",
+}
+
+FACULTY_EXTRA_COLUMNS = {
+    "password_hash": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def sync_schema_columns():
+    """Adds any newly introduced columns to existing SQLite tables without losing data."""
+    with engine.begin() as conn:
+        reg_cols = conn.execute(text("PRAGMA table_info(regulations)")).fetchall()
+        if reg_cols:
+            existing_reg = {row[1] for row in reg_cols}
+            for col_name, col_def in REGULATION_EXTRA_COLUMNS.items():
+                if col_name not in existing_reg:
+                    conn.execute(text(f"ALTER TABLE regulations ADD COLUMN {col_name} {col_def}"))
+
+        fac_cols = conn.execute(text("PRAGMA table_info(faculty)")).fetchall()
+        if fac_cols:
+            existing_fac = {row[1] for row in fac_cols}
+            for col_name, col_def in FACULTY_EXTRA_COLUMNS.items():
+                if col_name not in existing_fac:
+                    conn.execute(text(f"ALTER TABLE faculty ADD COLUMN {col_name} {col_def}"))
+
+
+sync_schema_columns()
 
 # 1. Initialize FastAPI app FIRST so routes can use it
 app = FastAPI(title="Academic Department EDMS")
@@ -163,18 +202,19 @@ class LoginRequest(BaseModel):
 
 
 class FacultyCreateRequest(BaseModel):
-    teacher_id: int                               # e.g., 102, 100
-    teacher_name: str                             # e.g., "Prof. Rao"
+    teacher_id: int
+    teacher_name: str
+    password: str
     user_id: Optional[int] = None
 
 
 class SubjectFileRule(BaseModel):
-    subject: str                                  # Subject name (applies across Year 1 to Year 4)
-    files: List[str] = []                         # e.g., ["fat1", "fat2"]
+    subject: str
+    files: List[str] = []
 
 
 class RegulationUpsertRequest(BaseModel):
-    regulation_name: str                          # e.g., "R25"
+    regulation_name: str
     description: Optional[str] = ""
 
     year_1_sem_1_subjects: List[str] = []
@@ -209,15 +249,15 @@ class AcademicYearSubjectFill(BaseModel):
     name: str
     year_no: Optional[int] = None
     semester_no: Optional[int] = None
-    course_type: Optional[str] = None             # e.g., "major", "minor", "value-added"
-    course_format: Optional[str] = None           # e.g., "theory", "practical", "theory-cum-practical"
-    teacher_id: Optional[int] = None              # Optional override when creating the year
-    extra_files: Optional[List[str]] = None       # Optional extra files for this academic year
+    course_type: Optional[str] = None
+    course_format: Optional[str] = None
+    teacher_id: Optional[int] = None
+    extra_files: Optional[List[str]] = None
 
 
 class AcademicYearCreateRequest(BaseModel):
-    year_range: str                               # e.g., "2026-2027"
-    regulation_name: str                          # e.g., "R25"
+    year_range: str
+    regulation_name: str
     subject_details: Optional[List[AcademicYearSubjectFill]] = None
 
 
@@ -225,7 +265,6 @@ class AcademicYearCreateRequest(BaseModel):
 
 @app.post("/api/admin/faculty")
 def add_faculty(payload: FacultyCreateRequest, db: Session = Depends(get_db)):
-    """Adds a teacher with a unique teacher_id into the Faculty table."""
     existing = db.query(models.Faculty).filter(
         models.Faculty.teacher_id == payload.teacher_id
     ).first()
@@ -235,10 +274,37 @@ def add_faculty(payload: FacultyCreateRequest, db: Session = Depends(get_db)):
             detail=f"Faculty with teacher_id {payload.teacher_id} already exists!"
         )
 
+    hashed_pw = pwd_context.hash(payload.password)
+    teacher_username = str(payload.teacher_id)
+
+    user_record = None
+    if payload.user_id is not None:
+        user_record = db.query(models.User).filter(models.User.id == payload.user_id).first()
+        if not user_record:
+            raise HTTPException(status_code=404, detail=f"User with id={payload.user_id} not found!")
+        user_record.username = teacher_username
+        user_record.password_hash = hashed_pw
+        user_record.role = "faculty"
+    else:
+        existing_user = db.query(models.User).filter(models.User.username == teacher_username).first()
+        if existing_user:
+            existing_user.password_hash = hashed_pw
+            existing_user.role = "faculty"
+            user_record = existing_user
+        else:
+            user_record = models.User(
+                username=teacher_username,
+                password_hash=hashed_pw,
+                role="faculty"
+            )
+            db.add(user_record)
+            db.flush()
+
     new_faculty = models.Faculty(
         teacher_id=payload.teacher_id,
         teacher_name=payload.teacher_name.strip(),
-        user_id=payload.user_id,
+        password_hash=hashed_pw,
+        user_id=user_record.id,
         is_active=True
     )
     db.add(new_faculty)
@@ -246,25 +312,28 @@ def add_faculty(payload: FacultyCreateRequest, db: Session = Depends(get_db)):
     db.refresh(new_faculty)
 
     return {
-        "message": "Faculty member added successfully.",
+        "message": "Faculty member added with login credentials.",
         "faculty": {
             "id": new_faculty.id,
             "teacher_id": new_faculty.teacher_id,
-            "teacher_name": new_faculty.teacher_name
+            "username": teacher_username,
+            "teacher_name": new_faculty.teacher_name,
+            "user_id": new_faculty.user_id
         }
     }
 
 
 @app.get("/api/admin/faculty")
 def list_faculty(db: Session = Depends(get_db)):
-    """Lists all faculty members in the Faculty table."""
     members = db.query(models.Faculty).order_by(models.Faculty.teacher_id.asc()).all()
     return {
         "faculty": [
             {
                 "id": m.id,
                 "teacher_id": m.teacher_id,
+                "username": str(m.teacher_id),
                 "teacher_name": m.teacher_name,
+                "user_id": m.user_id,
                 "is_active": m.is_active
             }
             for m in members
@@ -276,10 +345,6 @@ def list_faculty(db: Session = Depends(get_db)):
 
 @app.post("/api/admin/regulations")
 def upsert_regulation(payload: RegulationUpsertRequest, db: Session = Depends(get_db)):
-    """
-    Creates or updates a Regulation with Year 1-4 / Sem 1-2 subjects,
-    parallel teacher_id lists, subsequent folders, and subject_files.
-    """
     reg_name = payload.regulation_name.strip()
     if not reg_name:
         raise HTTPException(status_code=400, detail="regulation_name is required.")
@@ -396,7 +461,6 @@ def upsert_regulation(payload: RegulationUpsertRequest, db: Session = Depends(ge
 
 @app.get("/api/admin/regulations")
 def list_regulations(db: Session = Depends(get_db)):
-    """Lists all regulations with their subjects, teacher IDs, subsequent folders, and subject_files."""
     regs = db.query(models.Regulation).order_by(models.Regulation.regulation_name.asc()).all()
     return {
         "regulations": [
@@ -432,27 +496,44 @@ def list_regulations(db: Session = Depends(get_db)):
 
 @app.post("/api/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == request.username).first()
+    clean_username = request.username.strip()
 
-    if not user:
+    faculty_member = None
+    if clean_username.isdigit():
+        faculty_member = db.query(models.Faculty).filter(
+            models.Faculty.teacher_id == int(clean_username),
+            models.Faculty.is_active == True
+        ).first()
+
+    if faculty_member and faculty_member.password_hash:
+        if not pwd_context.verify(request.password, faculty_member.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password"
+            )
+        return {
+            "message": "Login successful",
+            "username": str(faculty_member.teacher_id),
+            "role": "faculty",
+            "teacher_id": faculty_member.teacher_id,
+            "teacher_name": faculty_member.teacher_name
+        }
+
+    user = db.query(models.User).filter(models.User.username == clean_username).first()
+    if not user or not pwd_context.verify(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password"
         )
 
-    if not pwd_context.verify(request.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password"
-        )
-
-    faculty_record = db.query(models.Faculty).filter(models.Faculty.user_id == user.id).first()
+    linked_faculty = db.query(models.Faculty).filter(models.Faculty.user_id == user.id).first()
 
     return {
         "message": "Login successful",
         "username": user.username,
         "role": user.role,
-        "teacher_id": faculty_record.teacher_id if faculty_record else user.id
+        "teacher_id": linked_faculty.teacher_id if linked_faculty else None,
+        "teacher_name": linked_faculty.teacher_name if linked_faculty else None
     }
 
 
@@ -476,11 +557,6 @@ def _find_subject_override(
 
 @app.post("/api/admin/create-academic-year")
 def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(get_db)):
-    """
-    Creates an academic year from year_range and regulation_name,
-    with optional subject_details to fill in extra details when creating the year.
-    """
-    # 1. QUERY & VALIDATE
     existing_year = db.query(models.AcademicYear).filter(
         models.AcademicYear.year_range == data.year_range.strip()
     ).first()
@@ -507,7 +583,6 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
                     detail=f"Faculty with teacher_id={ov.teacher_id} not found in Faculty table."
                 )
 
-    # 2. EXECUTE LOGIC
     new_academic_year = models.AcademicYear(year_range=data.year_range.strip())
     db.add(new_academic_year)
     db.commit()
@@ -628,7 +703,6 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
                 "subject_files_and_items_applied": applied_entries
             })
 
-    # 3. RETURN RESPONSE
     return {
         "message": f"Academic Year {new_academic_year.year_range} created from regulation '{reg_name}'.",
         "year_range": new_academic_year.year_range,
@@ -639,6 +713,77 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
 
 
 # --- FACULTY ROUTES ---
+
+@app.get("/api/faculty/upload-options/{teacher_id}")
+def get_faculty_upload_options(teacher_id: int, db: Session = Depends(get_db)):
+    subjects = db.query(models.Subject).filter(models.Subject.faculty_id == teacher_id).all()
+    faculty_member = db.query(models.Faculty).filter(models.Faculty.teacher_id == teacher_id).first()
+
+    if not subjects:
+        return {
+            "prompt": "Select an upload location",
+            "teacher_id": teacher_id,
+            "teacher_name": faculty_member.teacher_name if faculty_member else None,
+            "locations": [],
+            "message": "No subjects assigned to this faculty member."
+        }
+
+    grouped: Dict[str, Dict[int, Dict[int, list]]] = {}
+
+    for subj in subjects:
+        ac_year = db.query(models.AcademicYear).filter(
+            models.AcademicYear.id == subj.academic_year_id
+        ).first()
+        year_range = ac_year.year_range if ac_year else "Unknown"
+
+        subj_dir = (
+            STORAGE_ROOT
+            / year_range
+            / f"Year_{subj.year_no}"
+            / f"Semester_{subj.semester_no}"
+            / subj.name
+        )
+        available_subfolders = list(STANDARD_SUBFOLDERS)
+        if subj_dir.exists():
+            for child in subj_dir.iterdir():
+                if child.is_dir() and child.name not in available_subfolders:
+                    available_subfolders.append(child.name)
+
+        grouped.setdefault(year_range, {}).setdefault(subj.year_no, {}).setdefault(subj.semester_no, []).append({
+            "subject_id": subj.id,
+            "subject_name": subj.name,
+            "regulation": subj.regulation,
+            "subfolders": available_subfolders
+        })
+
+    locations = []
+    for year_range, years_map in grouped.items():
+        years_list = []
+        for y_no in sorted(years_map.keys()):
+            sems_list = []
+            for s_no in sorted(years_map[y_no].keys()):
+                sems_list.append({
+                    "semester_no": s_no,
+                    "semester_label": f"Semester_{s_no}",
+                    "subjects": years_map[y_no][s_no]
+                })
+            years_list.append({
+                "year_no": y_no,
+                "year_label": f"Year_{y_no}",
+                "semesters": sems_list
+            })
+        locations.append({
+            "academic_year": year_range,
+            "years": years_list
+        })
+
+    return {
+        "prompt": "Select Academic Year, Year, Semester, and Subject to upload your file",
+        "teacher_id": teacher_id,
+        "teacher_name": faculty_member.teacher_name if faculty_member else None,
+        "locations": locations
+    }
+
 
 @app.get("/api/faculty/subjects/{teacher_id}")
 def get_faculty_subjects(teacher_id: int, db: Session = Depends(get_db)):
@@ -678,6 +823,10 @@ def get_faculty_subjects(teacher_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/faculty/upload-file")
 async def upload_file(
+    teacher_id: int = Form(...),
+    academic_year: str = Form(...),
+    year_no: int = Form(...),
+    semester_no: int = Form(...),
     subject_id: int = Form(...),
     subfolder_name: str = Form(...),
     file: UploadFile = File(...),
@@ -687,11 +836,33 @@ async def upload_file(
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found!")
 
+    if subject.faculty_id != teacher_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Teacher {teacher_id} does not have access to subject '{subject.name}'."
+        )
+
     ac_year = db.query(models.AcademicYear).filter(
         models.AcademicYear.id == subject.academic_year_id
     ).first()
     if not ac_year:
         raise HTTPException(status_code=404, detail="Academic year not found for this subject!")
+
+    if ac_year.year_range != academic_year.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subject '{subject.name}' belongs to academic year '{ac_year.year_range}', not '{academic_year.strip()}'."
+        )
+    if subject.year_no != year_no:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subject '{subject.name}' belongs to Year_{subject.year_no}, not Year_{year_no}."
+        )
+    if subject.semester_no != semester_no:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subject '{subject.name}' belongs to Semester_{subject.semester_no}, not Semester_{semester_no}."
+        )
 
     target_dir = (
         STORAGE_ROOT
@@ -717,9 +888,12 @@ async def upload_file(
 
     file_stem = Path(original_filename).stem
     file_suffix = Path(original_filename).suffix
-    versioned_filename = f"{file_stem}_v{next_version}{file_suffix}" if next_version > 1 else original_filename
+    formatted_filename = (
+        f"{ac_year.year_range}_Y{subject.year_no}_S{subject.semester_no}"
+        f"_{subject.name}_{subfolder_name}_{file_stem}_v{next_version}{file_suffix}"
+    )
 
-    file_path = target_dir / versioned_filename
+    file_path = target_dir / formatted_filename
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -736,7 +910,14 @@ async def upload_file(
 
     return {
         "message": f"File uploaded successfully as Version {next_version}!",
-        "filename": versioned_filename,
+        "location": {
+            "academic_year": ac_year.year_range,
+            "year": f"Year_{subject.year_no}",
+            "semester": f"Semester_{subject.semester_no}",
+            "subject": subject.name,
+            "subfolder": subfolder_name
+        },
+        "filename": formatted_filename,
         "version": next_version,
         "path": str(file_path)
     }
