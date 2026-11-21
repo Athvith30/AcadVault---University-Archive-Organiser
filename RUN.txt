@@ -1,0 +1,10 @@
+AcadVault frontend with mock data (FastAPI)
+
+In the frontend folder, run:
+  py -m pip install -r requirements.txt
+  py -m uvicorn app:app --reload
+
+Open http://127.0.0.1:8000
+
+The upload and editing features remain mock-data demonstrations.
+No actual file storage, database, OneDrive, or separate backend is included.
