@@ -1,0 +1,39 @@
+/* AcadVault: Bootstrap handles layout, forms and buttons. */
+:root { --bs-primary: #24436a; --bs-primary-rgb: 36,67,106; --bs-link-color: #24436a; --bs-link-hover-color: #172e4c; }
+body { min-height: 100vh; background: #f5f7fa; color: #243247; font-family: Arial, Helvetica, sans-serif; display: flex; }
+h1, h2, h3, h4, h5, h6 { color: #243e60; }
+.sidebar { width: 235px; flex-shrink: 0; padding: 24px 15px; background: #182d49; color: #fff; }
+.logo { color: #f2bf64; font-size: 24px; font-weight: 700; margin-bottom: 30px; }
+.sidebar h4 { font-size: 11px; letter-spacing: 1px; color: #f2bf64; text-transform: uppercase; margin: 22px 12px 10px; }
+.sidebar a { display: block; margin: 3px 0; padding: 11px 13px; color: #dce5f0; border-radius: 7px; text-decoration: none; font-size: 14px; }
+.sidebar a:hover, .sidebar a.active { background: #304d72; color: white; border-left: 3px solid #f2bf64; padding-left: 10px; }
+.main { flex: 1; min-width: 0; padding: 28px 32px; }
+.welcome { margin-bottom: 24px; }
+.welcome h1 { font-size: 28px; }
+.welcome p, .stat-card p { color: #6c7787; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
+.stat-card, .documents, .card { background: white; border: 1px solid #e0e6ed; border-radius: 9px; }
+.stat-card { padding: 20px; border-bottom: 3px solid #d6a04f; }
+.stat-card h2 { font-size: 27px; margin-bottom: 8px; }
+.stat-card p { margin: 0; font-size: 13px; }
+.documents { padding: 22px; margin-bottom: 22px; overflow-x: auto; }
+.documents h3 { font-size: 23px; margin-bottom: 20px; }
+.btn-primary { --bs-btn-bg: #24436a; --bs-btn-border-color: #24436a; --bs-btn-hover-bg: #182f4e; --bs-btn-hover-border-color: #182f4e; --bs-btn-active-bg: #182f4e; --bs-btn-active-border-color: #182f4e; }
+.btn-outline-primary { --bs-btn-color: #24436a; --bs-btn-border-color: #24436a; --bs-btn-hover-bg: #24436a; --bs-btn-hover-border-color: #24436a; }
+.form-control:focus, .form-select:focus { border-color: #7390b2; box-shadow: 0 0 0 .2rem rgba(36,67,106,.12); }
+.table { --bs-table-striped-bg: #f8fafc; }
+.status { background: #fff2d9; color: #765018; border-radius: 12px; padding: 5px 10px; font-size: 12px; }
+.search { max-width: 460px; }
+.drop-zone { background: #f7f9fc; border: 1px dashed #afbdd0; }
+.drop-zone.dragging { background: #eaf1fa; border-color: #24436a; }
+.explorer-tree { max-height: 450px; overflow-y: auto; }
+.explorer-item strong { overflow-wrap: anywhere; }
+#explorerItems.list-mode { display: block; }
+#explorerItems.list-mode > .explorer-item { width: 100%; margin-bottom: 8px; }
+#explorerItems.list-mode .card-body { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+#explorerItems.list-mode .card-body > .mt-2 { margin-top: 0 !important; margin-left: auto; }
+#explorer { background: #f9fbfd; }
+.explorer-toolbar .form-control { min-width: 150px; }
+.file-input { display: none; }
+@media (max-width: 1000px) { .stats { grid-template-columns: repeat(2, minmax(0,1fr)); } .sidebar { width: 205px; } .main { padding: 22px; } }
+@media (max-width: 650px) { body { display: block; } .sidebar { width: 100%; padding: 15px; } .sidebar a { display: inline-block; margin-right: 4px; } .sidebar h4 { margin: 12px 0 8px; } .logo { margin-bottom: 10px; } .main { padding: 18px 14px; } .stats { gap: 10px; } .documents { padding: 15px; } }
