@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Subjects - Shiv Nadar University Digital Archive{% endblock %}
+{% block page_title %}Subjects{% endblock %}
+{% block page_subtitle %}Browse and manage academic subjects and their files.{% endblock %}
+{% block page_actions %}
+  <a href="/dashboard" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+{% endblock %}
+
+{% block content %}
+<!-- Filter by Academic Year -->
+<div class="doc-card animate-fade-in stagger-1">
+  <div class="doc-card-body">
+    <form method="get" action="/subjects" class="filter-form">
+      <label class="form-label" style="margin-bottom:8px;display:block;">Filter by Academic Year</label>
+      <select name="year_id" class="form-select d-inline w-auto" style="width:260px;" onchange="this.form.submit()">
+        <option value="">All years</option>
+        {% for y in years %}
+        <option value="{{ y.id }}" {% if selected_year == y.id %}selected{% endif %}>{{ y.label }}</option>
+        {% endfor %}
+      </select>
+      <a href="/subjects" class="btn btn-sm btn-ghost" style="margin-left:12px;">Reset</a>
+    </form>
+  </div>
+</div>
+
+<!-- Subject List -->
+<div class="table-container animate-fade-in stagger-2">
+  <div class="section-header">
+    <h2>Subject List</h2>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Regulation</th>
+          <th>Semester</th>
+          <th>Year</th>
+          <th>Files</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in subjects %}
+        <tr>
+          <td><strong style="color:var(--color-burgundy);">{{ s.code }}</strong></td>
+          <td>{{ s.name }}</td>
+          <td><span class="status-badge info">{{ s.regulation }}</span></td>
+          <td>{{ s.semester }}</td>
+          <td>{{ s.academic_year.label if s.academic_year else '-' }}</td>
+          <td>{{ s.uploads|length }}</td>
+          <td>
+            <div class="table-actions">
+              <a href="/subjects/{{ s.id }}" class="action-btn view" title="View Files">
+                <i class="fa-solid fa-folder-open"></i>
+              </a>
+              {% if user.role == "admin" or (user.role == "faculty" and s.created_by == user.id) %}
+              <form method="post" action="/subjects" style="display:inline;" onsubmit="return confirm('Add a duplicate of this subject?');">
+                <input type="hidden" name="code" value="{{ s.code }}">
+                <input type="hidden" name="name" value="{{ s.name }}">
+                <input type="hidden" name="regulation" value="{{ s.regulation }}">
+                <input type="hidden" name="semester" value="{{ s.semester }}">
+                <input type="hidden" name="academic_year_id" value="{{ s.academic_year_id }}">
+                <button type="submit" class="action-btn edit" title="Duplicate Subject">
+                  <i class="fa-solid fa-copy"></i>
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" style="text-align:center;padding:24px;color:var(--color-text-secondary);">No subjects found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add New Subject -->
+{% if user.role == "admin" %}
+<div class="doc-card animate-fade-in stagger-3">
+  <div class="doc-card-header">
+    <div class="file-icon" style="background:#e8f9ef;color:#2f855a;">
+      <i class="fa-solid fa-plus"></i>
+    </div>
+  </div>
+  <div class="doc-card-body">
+    <h3 class="doc-card-title">Add New Subject</h3>
+    <form method="post" action="/subjects">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Subject Code <span class="required">*</span></label>
+          <input type="text" name="code" class="form-control" placeholder="e.g. CS101" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Subject Name <span class="required">*</span></label>
+          <input type="text" name="name" class="form-control" placeholder="e.g. Computer Science" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Regulation</label>
+          <input type="text" name="regulation" class="form-control" value="R2023" placeholder="R2023">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Semester <span class="required">*</span></label>
+          <select name="semester" class="form-select" required>
+            {% for i in range(1, 9) %}<option value="{{ i }}">{{ i }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Academic Year <span class="required">*</span></label>
+          <select name="academic_year_id" class="form-select" required>
+            <option value="">Select Year</option>
+            {% for y in years %}<option value="{{ y.id }}">{{ y.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary">Add Subject</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

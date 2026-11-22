@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Shiv Nadar University Digital Archive{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Welcome back, {{ user.username }}. Here's what's happening in your archive.{% endblock %}
+
+{% block content %}
+<!-- Hero -->
+<section class="hero animate-fade-in">
+  <div class="hero-content">
+    <h1>Shiv Nadar University <span style="color:var(--color-champagne);">Digital Archive</span></h1>
+    <p>Organize, share, and manage academic documents across subjects and academic years.</p>
+  </div>
+  <div class="hero-actions">
+    {% if user.role in ["admin", "faculty"] %}
+    <a href="/files/upload" class="btn btn-primary">
+      <i class="fa-solid fa-cloud-arrow-up"></i> Upload File
+    </a>
+    {% endif %}
+    <a href="/subjects" class="btn btn-outline">
+      <i class="fa-solid fa-book-open-reader"></i> Browse Subjects
+    </a>
+  </div>
+</section>
+
+<!-- Statistics -->
+<div class="stats animate-fade-in stagger-1">
+  <div class="stat-card">
+    <div class="stat-icon">
+      <i class="fa-solid fa-book-open-reader"></i>
+    </div>
+    <h2>{{ subjects|length }}</h2>
+    <p>Total Subjects</p>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:linear-gradient(135deg, var(--color-champagne-dark), #e8d4a8); color:var(--color-burgundy);">
+      <i class="fa-solid fa-file"></i>
+    </div>
+    <h2>{{ total_files }}</h2>
+    <p>Total Files</p>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:linear-gradient(135deg, #7c3aed, #a78bfa); color:var(--color-white);">
+      <i class="fa-solid fa-users"></i>
+    </div>
+    <h2>{{ total_users }}</h2>
+    <p>Total Users</p>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:linear-gradient(135deg, #0891b2, #22d3ee); color:var(--color-white);">
+      <i class="fa-solid fa-calendar-days"></i>
+    </div>
+    <h2>{{ years|length }}</h2>
+    <p>Academic Years</p>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Quick Actions -->
+  <div class="col-lg-4 animate-fade-in stagger-2">
+    <div class="documents-grid" style="grid-template-columns: 1fr;">
+      <div class="doc-card quick-action-card animate-slide-up" style="animation-delay: 100ms;">
+        <div class="doc-card-header">
+          <div class="file-icon" style="background:#fef0f0;color:#dc3545;">
+            <i class="fa-solid fa-users-gear"></i>
+          </div>
+        </div>
+        <div class="doc-card-body">
+          <h3 class="doc-card-title">Manage Users</h3>
+          <div class="doc-card-meta">
+            <span><i class="fa-solid fa-user"></i> Add, edit, and remove users</span>
+            <span><i class="fa-solid fa-shield-halved"></i> Role-based access control</span>
+          </div>
+        </div>
+        <div class="doc-card-footer">
+          {% if user.role == "admin" %}
+          <a href="/admin/users" class="btn btn-sm btn-outline">Go <i class="fa-solid fa-arrow-right"></i></a>
+          {% else %}
+          <span class="btn btn-sm btn-outline" style="opacity:0.5;">Admin only</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="doc-card quick-action-card animate-slide-up" style="animation-delay: 200ms;">
+        <div class="doc-card-header">
+          <div class="file-icon" style="background:#e8f9ef;color:#2f855a;">
+            <i class="fa-solid fa-calendar-days"></i>
+          </div>
+        </div>
+        <div class="doc-card-body">
+          <h3 class="doc-card-title">Academic Years</h3>
+          <div class="doc-card-meta">
+            <span><i class="fa-solid fa-layer-group"></i> Organize by academic year</span>
+            <span><i class="fa-solid fa-hashtag"></i> Link subjects to years</span>
+          </div>
+        </div>
+        <div class="doc-card-footer">
+          {% if user.role == "admin" %}
+          <a href="/admin/academic-years" class="btn btn-sm btn-outline">Go <i class="fa-solid fa-arrow-right"></i></a>
+          {% else %}
+          <span class="btn btn-sm btn-outline" style="opacity:0.5;">Admin only</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="col-lg-8 animate-fade-in stagger-3">
+    <div class="table-container">
+      <div class="section-header">
+        <h2>Recent Activity</h2>
+        <a href="/subjects" class="btn btn-sm btn-outline">View All Subjects</a>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Subject</th>
+              <th>Version</th>
+              <th>Uploaded By</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if recent_files %}
+              {% for f in recent_files %}
+              <tr>
+                <td>
+                  <div class="file-cell">
+                    <div class="file-icon {{ (f.original_filename|lower).endswith('.pdf') and 'pdf' or (f.original_filename|lower).endswith('.docx') and 'docx' or (f.original_filename|lower).endswith('.pptx') and 'pptx' or (f.original_filename|lower).endswith('.xlsx') and 'xlsx' or (f.original_filename|lower).endswith('.zip') and 'zip' or 'other' }}">
+                      <i class="fa-solid fa-file"></i>
+                    </div>
+                    <div class="file-info">
+                      <div class="file-name">{{ f.original_filename }}</div>
+                      <div class="file-meta">{{ f.mime_type }} · {{ file_size_str(f.file_size) }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>{{ f.subject.code }} - {{ f.subject.name }}</td>
+                <td><span class="status-badge draft">v{{ f.version }}</span></td>
+                <td>{{ f.uploader.username if f.uploader else '-' }}</td>
+                <td>{{ f.uploaded_at.strftime('%Y-%m-%d') if f.uploaded_at else '-' }}</td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5" style="text-align:center;padding:30px;color:var(--color-text-secondary);">
+                  <i class="fa-solid fa-inbox" style="font-size:24px;opacity:0.4;display:block;margin-bottom:8px;"></i>
+                  No recent uploads.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
