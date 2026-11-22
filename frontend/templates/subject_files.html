@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}{{ subject.code }} - Files - Shiv Nadar University Digital Archive{% endblock %}
+{% block page_title %}{{ subject.code }} — {{ subject.name }}{% endblock %}
+{% block page_subtitle %}Regulation: {{ subject.regulation }} · Semester: {{ subject.semester }} · {{ subject.academic_year.label if subject.academic_year else '-' }}{% endblock %}
+{% block page_actions %}
+  <a href="/subjects" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Back to Subjects</a>
+  {% if user.role in ["admin", "faculty"] and (user.role == "admin" or subject.created_by == user.id) %}
+  <a href="/files/upload?subject_id={{ subject.id }}" class="btn btn-primary"><i class="fa-solid fa-cloud-arrow-up"></i> Upload File</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if files %}
+  {% set grouped = {} %}
+  {% for f in files %}
+    {% set _ = grouped.__setitem__(f.original_filename, grouped.setdefault(f.original_filename, []) + [f]) %}
+  {% endfor %}
+  {% for fname, versions in grouped.items() %}
+  {% set latest = versions[0] %}
+  <div class="doc-card animate-fade-in stagger-{{ loop.index }}">
+    <div class="doc-card-header">
+      <div class="file-icon {{ (fname|lower).endswith('.pdf') and 'pdf' or (fname|lower).endswith('.docx') and 'docx' or (fname|lower).endswith('.pptx') and 'pptx' or (fname|lower).endswith('.xlsx') and 'xlsx' or (fname|lower).endswith('.zip') and 'zip' or 'other' }}">
+        <i class="fa-solid fa-file"></i>
+      </div>
+    </div>
+    <div class="doc-card-body">
+      <h3 class="doc-card-title">{{ fname }}</h3>
+      <div class="doc-card-meta">
+        <span><i class="fa-solid fa-layer-group"></i> {{ versions|length }} version{{ 's' if versions|length > 1 else '' }}</span>
+        <span><i class="fa-solid fa-hashtag"></i> {{ latest.mime_type }}</span>
+        <span><i class="fa-solid fa-clock"></i> Latest: v{{ latest.version }}</span>
+      </div>
+    </div>
+    <div class="doc-card-footer">
+      <div class="table-actions">
+        <a href="/files/{{ latest.id }}/download" class="action-btn download" title="Download v{{ latest.version }}">
+          <i class="fa-solid fa-download"></i>
+        </a>
+        {% if user.role in ["admin", "faculty"] and (user.role == "admin" or subject.created_by == user.id) %}
+        <form method="post" action="/files/{{ latest.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this file version?');">
+          <button type="submit" class="action-btn delete" title="Delete v{{ latest.version }}">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </form>
+        {% endif %}
+        {% if versions|length > 1 %}
+        <div class="dropdown">
+          <button class="action-btn" title="All versions" style="background:var(--color-ivory-dark);color:var(--color-burgundy);">
+            <i class="fa-solid fa-layer-group"></i>
+          </button>
+          <div class="dropdown-menu">
+            {% for v in versions %}
+            <a href="/files/{{ v.id }}/download" class="dropdown-item">
+              <i class="fa-solid fa-download"></i> Download v{{ v.version }}
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="empty-state animate-fade-in">
+  <i class="fa-solid fa-folder"></i>
+  <h3>No files yet</h3>
+  <p>Upload your first document for this subject.</p>
+  {% if user.role in ["admin", "faculty"] and (user.role == "admin" or subject.created_by == user.id) %}
+  <a href="/files/upload?subject_id={{ subject.id }}" class="btn btn-primary mt-3"><i class="fa-solid fa-cloud-arrow-up"></i> Upload File</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

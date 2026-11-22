@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Upload File - Shiv Nadar University Digital Archive{% endblock %}
+{% block page_title %}Upload File{% endblock %}
+{% block page_subtitle %}Upload academic documents to a subject.{% endblock %}
+{% block page_actions %}
+  <a href="/dashboard" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+{% endblock %}
+
+{% block content %}
+{% if subjects %}
+<div class="doc-card animate-fade-in stagger-1">
+  <div class="doc-card-header">
+    <div class="file-icon" style="background:#e8f4fd;color:#2b6cb0;">
+      <i class="fa-solid fa-cloud-arrow-up"></i>
+    </div>
+  </div>
+  <div class="doc-card-body">
+    <h3 class="doc-card-title">Upload Document</h3>
+    <form method="post" action="/files/upload" enctype="multipart/form-data">
+      <div class="form-group">
+        <label class="form-label">Subject <span class="required">*</span></label>
+        <select name="subject_id" class="form-select" required>
+          <option value="">Select a subject</option>
+          {% for s in subjects %}
+          <option value="{{ s.id }}">{{ s.code }} — {{ s.name }} ({{ s.academic_year.label if s.academic_year else '-' }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-top:24px;">
+        <label class="form-label">Choose File <span class="required">*</span></label>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" name="file" id="fileInput" required>
+          <div id="zoneContent">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            <p style="font-weight:600;margin-bottom:4px;">Drag &amp; drop your file here</p>
+            <small>PDF, DOCX, images, ZIP, etc. Max {{ settings.MAX_FILE_SIZE_MB if settings else 50 }} MB</small>
+          </div>
+          <div id="selectedFile" class="upload-preview" style="display:none;">
+            <div class="file-icon other">
+              <i class="fa-solid fa-file"></i>
+            </div>
+            <div class="upload-preview-info">
+              <div class="upload-preview-name" id="selectedFileName">file.pdf</div>
+              <div class="upload-preview-size" id="selectedFileSize">0 MB</div>
+            </div>
+            <button type="button" class="upload-preview-remove" id="removeFile" title="Remove">
+              <i class="fa-solid fa-times"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:24px;">
+        <button type="submit" class="btn btn-primary w-100">Upload File</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="alert alert-info animate-fade-in stagger-2">
+  <i class="fa-solid fa-info-circle"></i>
+  Files are versioned automatically. Uploading a file with the same name creates a new version (v1, v2, ...).
+</div>
+{% else %}
+<div class="empty-state animate-fade-in">
+  <i class="fa-solid fa-folder"></i>
+  <h3>No subjects available</h3>
+  <p>Please create an academic year and subject first before uploading files.</p>
+  <a href="/admin/academic-years" class="btn btn-primary mt-3"><i class="fa-solid fa-calendar-plus"></i> Create Academic Year</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const zone = document.getElementById('uploadZone');
+  const input = document.getElementById('fileInput');
+  const zoneContent = document.getElementById('zoneContent');
+  const selectedFile = document.getElementById('selectedFile');
+  const fileName = document.getElementById('selectedFileName');
+  const fileSize = document.getElementById('selectedFileSize');
+  const removeBtn = document.getElementById('removeFile');
+
+  zone.addEventListener('click', () => input.click());
+
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) input.files = e.dataTransfer.files;
+    updateFileDisplay();
+  });
+
+  input.addEventListener('change', updateFileDisplay);
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function updateFileDisplay() {
+    if (input.files && input.files[0]) {
+      const f = input.files[0];
+      fileName.textContent = f.name;
+      fileSize.textContent = formatSize(f.size);
+      zoneContent.style.display = 'none';
+      selectedFile.style.display = 'flex';
+    } else {
+      zoneContent.style.display = 'block';
+      selectedFile.style.display = 'none';
+    }
+  }
+
+  removeBtn.addEventListener('click', () => {
+    input.value = '';
+    updateFileDisplay();
+  });
+</script>
+{% endblock %}
