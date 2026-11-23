@@ -1030,5 +1030,6 @@ def delete_uploaded_file(file_version_id: int, teacher_id: int, db: Session = De
         "deleted_path": str(stored_path)
     }
 
-#uvicorn main:app --reload
+#uvicorn main_with_delete_features:app --reload
+
 #http://127.0.0.1:8000/docs
