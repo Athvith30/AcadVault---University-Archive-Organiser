@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}File Status - Shiv Nadar University Digital Archive{% endblock %}
+{% block page_title %}File Status{% endblock %}
+{% block page_subtitle %}Admin overview of uploaded and missing document categories by subject.{% endblock %}
+{% block content %}
+<div class="doc-card mb-4"><div class="doc-card-body">
+<form method="get" action="/admin/file-status" class="d-flex align-items-end flex-wrap gap-3">
+<div><label class="form-label" for="statusYear">Academic Year</label><select id="statusYear" name="year_id" class="form-select">
+<option value="">All years</option>{% for year in years %}<option value="{{ year.id }}" {% if year_id == year.id %}selected{% endif %}>{{ year.label }}</option>{% endfor %}</select></div>
+<button class="btn btn-primary" type="submit">Filter</button><a class="btn btn-ghost" href="/admin/file-status">Reset</a>
+</form></div></div>
+<div class="table-container"><div class="section-header"><h2>Uploaded / Missing Files</h2></div>
+<div class="table-wrapper"><table><thead><tr><th>Subject</th><th>Year</th><th>Uploaded</th><th>Missing</th><th>Details</th></tr></thead>
+<tbody>{% for item in rows %}<tr>
+<td><strong>{{ item.subject.code }}</strong> — {{ item.subject.name }}</td>
+<td>{{ item.subject.academic_year.label }}</td>
+<td>{% for cat in item.uploaded %}<span class="status-badge success">{{ cat }}</span> {% else %}None{% endfor %}</td>
+<td>{% for cat in item.missing %}<span class="status-badge draft">{{ cat }}</span> {% else %}None{% endfor %}</td>
+<td><a class="btn btn-sm btn-outline" href="/subjects/{{ item.subject.id }}">View Files</a></td>
+</tr>{% else %}<tr><td colspan="5" class="text-center p-4">No subjects found.</td></tr>{% endfor %}
+</tbody></table></div></div>
+<p class="mt-3 text-muted small">Categories tracked: {{ categories|join(', ') }}. Status is inferred from the beginning of each uploaded filename (for example, "CIA 1 - Test.pdf"). Files with other naming patterns are not classified.</p>
+{% endblock %}

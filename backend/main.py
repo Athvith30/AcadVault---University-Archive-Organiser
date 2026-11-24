@@ -42,6 +42,12 @@ def role_label(role):
 templates.env.filters["role_label"] = role_label
 
 
+# Some browsers request /favicon.ico even when a page links to the SVG icon.
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return RedirectResponse(url="/static/favicon.svg", status_code=302)
+
+
 # ---------- helpers ----------
 
 def get_current_user_from_session(request: Request, db: Session = Depends(get_db)):
@@ -93,6 +99,104 @@ def file_size_str(size_bytes: int) -> str:
     if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
     return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+# ---------- document categories for the admin file status view ----------
+
+DOCUMENT_CATEGORIES = (
+    "Namelist", "Course Files", "Notes", "Modules",
+    "CIA 1", "Midsem", "CIA 2", "Endsem",
+)
+
+
+def filename_category(filename: str):
+    """Best-effort classification without changing the existing database schema.
+
+    Filenames beginning with a document category are recognized. Files with
+    other names remain unclassified rather than being counted incorrectly.
+    """
+    normalized = filename.lower().replace("_", " ").replace("-", " ").strip()
+    for category in DOCUMENT_CATEGORIES:
+        if normalized.startswith(category.lower() + " ") or normalized.startswith(category.lower() + "."):
+            return category
+    return None
+
+
+# ---------- search (authenticated users) ----------
+
+@app.get("/search", response_class=HTMLResponse)
+def search_archive(
+    request: Request,
+    user: User = Depends(require_auth_html),
+    db: Session = Depends(get_db),
+    q: str = "",
+    year_id: Optional[int] = None,
+    semester: Optional[int] = None,
+    category: str = "",
+):
+    keyword = q.strip()
+    query = db.query(Subject)
+    if year_id:
+        query = query.filter(Subject.academic_year_id == year_id)
+    if semester:
+        query = query.filter(Subject.semester == semester)
+    subjects = query.order_by(Subject.code).all()
+
+    # A file matches a keyword on its filename OR its subject name/code.
+    # Category filtering uses the existing filename conventions, not new columns.
+    results = []
+    for subject in subjects:
+        subject_match = keyword.lower() in (subject.code + " " + subject.name).lower()
+        matching_files = []
+        for upload in subject.uploads:
+            if keyword and not (subject_match or keyword.lower() in upload.original_filename.lower()):
+                continue
+            detected_category = filename_category(upload.original_filename)
+            if category and detected_category != category:
+                continue
+            matching_files.append(upload)
+        # When there is a category filter, show only subjects with matching files.
+        if category and not matching_files:
+            continue
+        if not category and keyword and not subject_match and not matching_files:
+            continue
+        results.append({"subject": subject, "files": matching_files})
+
+    return templates.TemplateResponse("search.html", {
+        "request": request, "user": user, "results": results,
+        "years": db.query(AcademicYear).order_by(AcademicYear.label.desc()).all(),
+        "categories": DOCUMENT_CATEGORIES, "q": keyword,
+        "year_id": year_id, "semester": semester, "category": category,
+    })
+
+
+# ---------- file status (admin only) ----------
+
+@app.get("/admin/file-status", response_class=HTMLResponse)
+def admin_file_status(
+    request: Request,
+    user: User = Depends(require_role_html(["admin"])),
+    db: Session = Depends(get_db),
+    year_id: Optional[int] = None,
+):
+    query = db.query(Subject)
+    if year_id:
+        query = query.filter(Subject.academic_year_id == year_id)
+    subjects = query.order_by(Subject.semester, Subject.code).all()
+    rows = []
+    for subject in subjects:
+        uploaded = {filename_category(f.original_filename) for f in subject.uploads}
+        uploaded.discard(None)
+        rows.append({
+            "subject": subject,
+            "uploaded": [c for c in DOCUMENT_CATEGORIES if c in uploaded],
+            "missing": [c for c in DOCUMENT_CATEGORIES if c not in uploaded],
+        })
+    return templates.TemplateResponse("file_status.html", {
+        "request": request, "user": user, "rows": rows,
+        "categories": DOCUMENT_CATEGORIES, "year_id": year_id,
+        "years": db.query(AcademicYear).order_by(AcademicYear.label.desc()).all(),
+    })
 
 
 # ---------- auth (API + HTML) ----------
