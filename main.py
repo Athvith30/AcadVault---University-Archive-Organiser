@@ -167,14 +167,8 @@ def dashboard(req: Request):
 
 @app.get('/subjects', include_in_schema=False)
 def subjects(req: Request):
-    if not current(req): return go('/login')
-    db = SessionLocal()
-    try:
-        years = {x.id: x.year_range for x in db.query(models.AcademicYear).all()}
-        subj = authorized_subjects(req, db)
-        return display(req, 'subjects.html', subjects=subj, years=years,
-                       faculty={f.teacher_id: f.teacher_name for f in db.query(models.Faculty).all()})
-    finally: db.close()
+    # Old bookmarks still work; subjects are now browsed inside the file explorer.
+    return go('/explorer' if current(req) else '/login')
 
 
 def valid_name(value):
@@ -220,12 +214,14 @@ def explorer(req: Request, subject_id: int = 0):
         chosen = next((s for s in subs if s.id == subject_id), None)
         directory_list = []
         if chosen:
-            base = backend.STORAGE_ROOT / years.get(chosen.academic_year_id, '') / f'Year_{chosen.year_no}' / f'Semester_{chosen.semester_no}' / chosen.name
-            folders = sorted([p for p in base.iterdir() if p.is_dir()], key=lambda p:p.name.lower()) if base.exists() else []
-            versions = db.query(models.FileVersion).filter(models.FileVersion.subject_id == chosen.id).all()
-            for folder in folders:
-                directory_list.append({'name': folder.name, 'files': [x for x in versions if x.subfolder_name == folder.name]})
-        return display(req,'explorer.html', subjects=subs, years=years, chosen=chosen, directory_list=directory_list)
+            base = subject_directory(db, chosen)
+            versions = db.query(models.FileVersion).filter(models.FileVersion.subject_id == chosen.id).order_by(models.FileVersion.subfolder_name, models.FileVersion.file_name, models.FileVersion.version_number.desc()).all()
+            names = {v.subfolder_name for v in versions}
+            if base.exists():
+                names.update(p.name for p in base.iterdir() if p.is_dir() and p.resolve().is_relative_to(base.resolve()))
+            for name in sorted(names, key=str.casefold):
+                directory_list.append({'name': name, 'files': [x for x in versions if x.subfolder_name == name]})
+        return display(req, 'explorer.html', subjects=subs, years=years, chosen=chosen, directory_list=directory_list)
     finally: db.close()
 
 
@@ -275,20 +271,36 @@ async def rename_explorer_folder(req: Request):
         if not source.is_dir(): raise HTTPException(404, 'Folder does not exist')
         if dest.exists(): raise HTTPException(409, 'Destination folder already exists')
         records = db.query(models.FileVersion).filter_by(subject_id=sid, subfolder_name=old_name).all()
-        new_paths = []
+        # Rename the stored files as well, so their names reflect the new folder.
+        plan = []
         for record in records:
-            path = stored_file_path(record, sub, db)
-            if not path.is_file():
+            old_path = stored_file_path(record, sub, db)
+            if not old_path.is_file():
                 raise HTTPException(409, 'A registered file is missing. Rename cancelled.')
-            new_paths.append((record, dest / path.name))
+            new_filename = backend.canonical_filename(sub, new_name, old_path.suffix, record.version_number)
+            target = dest / new_filename
+            plan.append((record, old_path.name, new_filename, target))
+        new_names = [x[2].lower() for x in plan]
+        if len(set(new_names)) != len(new_names):
+            raise HTTPException(409, 'Existing file versions would create duplicate names')
         source.rename(dest)
+        renamed = []
         try:
-            for record, path in new_paths:
+            for record, old_filename, new_filename, target in plan:
+                initial = dest / old_filename
+                if initial != target:
+                    if target.exists():
+                        raise HTTPException(409, 'The destination filename already exists')
+                    initial.rename(target)
+                    renamed.append((target, initial))
+                record.file_name = new_filename
                 record.subfolder_name = new_name
-                record.onedrive_path = str(path)
+                record.onedrive_path = str(target)
             db.commit()
         except Exception:
             db.rollback()
+            for new_path, old_path in reversed(renamed):
+                if new_path.exists(): new_path.rename(old_path)
             dest.rename(source)
             raise
         flash(req, f'Folder renamed from {old_name} to {new_name}')
@@ -311,9 +323,6 @@ async def edit_file_record(req: Request, file_id: int):
         sub = db.query(models.Subject).filter_by(id=record.subject_id).first()
         if not sub: raise HTTPException(404, 'Subject no longer exists')
         require_edit_access(req, sub)
-        new_name = valid_name(form.get('file_name'))
-        if not re.fullmatch(r'[\w .()\-]+\.(pdf|docx|pptx|xlsx|csv|jpg|jpeg|png|gif|zip)', new_name, re.I):
-            raise HTTPException(400, 'File name must have a supported extension')
         new_folder = valid_name(form.get('subfolder_name'))
         subject_dir = subject_directory(db, sub).resolve()
         target_dir = (subject_dir / new_folder).resolve()
@@ -321,10 +330,9 @@ async def edit_file_record(req: Request, file_id: int):
             raise HTTPException(400, 'Destination folder does not exist')
         old_path = stored_file_path(record, sub, db)
         if not old_path.is_file(): raise HTTPException(404, 'Stored file is missing')
-        # Preserve version number and physical name format established by the backend.
-        year = db.query(models.AcademicYear).filter_by(id=sub.academic_year_id).first()
-        new_physical = f'{year.year_range}_Y{sub.year_no}_S{sub.semester_no}_{sub.name}_{new_folder}_{Path(new_name).stem}_v{record.version_number}{Path(new_name).suffix}'
-        destination = (target_dir / new_physical).resolve()
+        # Editing a record changes the destination and its canonical name together.
+        new_name = backend.canonical_filename(sub, new_folder, Path(record.file_name).suffix, record.version_number)
+        destination = (target_dir / new_name).resolve()
         if destination != old_path and destination.exists():
             raise HTTPException(409, 'A file with the destination name already exists')
         duplicate = db.query(models.FileVersion).filter(
@@ -435,9 +443,7 @@ def upload_page(req: Request):
         location_options = {}
         for s in subs:
             location = backend.STORAGE_ROOT / years.get(s.academic_year_id, '') / f'Year_{s.year_no}' / f'Semester_{s.semester_no}' / s.name
-            folders = backend.STANDARD_SUBFOLDERS[:]
-            if location.is_dir():
-                folders.extend(c.name for c in location.iterdir() if c.is_dir() and c.name not in folders)
+            folders = sorted((c.name for c in location.iterdir() if c.is_dir()), key=str.casefold) if location.is_dir() else []
             location_options[str(s.id)] = folders
         return display(req, 'upload.html', subjects=subs, years=years, locations=json.dumps(location_options))
     finally: db.close()
@@ -465,6 +471,8 @@ async def upload_action(req: Request):
         valid_folder = backend.STORAGE_ROOT / ac_year.year_range / f'Year_{subj.year_no}' / f'Semester_{subj.semester_no}' / subj.name / subfolder
         if not valid_folder.resolve().is_relative_to((backend.STORAGE_ROOT / ac_year.year_range).resolve()):
             raise HTTPException(status_code=400, detail='Invalid folder path')
+        if not valid_folder.is_dir():
+            raise HTTPException(status_code=400, detail='Select an existing subject folder')
         if Path(upl.filename).name != upl.filename or not re.fullmatch(r'[\w .()\-]+\.(pdf|docx|pptx|xlsx|csv|jpg|jpeg|png|gif|zip)', upl.filename, re.I):
             raise HTTPException(status_code=400, detail='Unsupported or unsafe filename')
         if upl.size is not None and upl.size > 25 * 1024 * 1024:
@@ -472,7 +480,7 @@ async def upload_action(req: Request):
         result = await backend.upload_file(teacher_id=subj.faculty_id, academic_year=ac_year.year_range,
             year_no=subj.year_no, semester_no=subj.semester_no, subject_id=subject_id,
             subfolder_name=subfolder, file=upl, db=db)
-        flash(req, result['message'])
+        flash(req, f"File saved as {result['filename']} (version {result['version']})")
     except (HTTPException, ValueError) as exc:
         flash(req, exc.detail if isinstance(exc, HTTPException) else 'Invalid subject', True)
     except Exception as exc:
@@ -527,6 +535,66 @@ def admin_page(req: Request):
             regulations=db.query(models.Regulation).all(), years=db.query(models.AcademicYear).all(),
             subjects=db.query(models.Subject).order_by(models.Subject.id.desc()).all())
     finally: db.close()
+
+
+@app.post('/admin/subject', include_in_schema=False)
+async def create_subject(req: Request):
+    if not is_admin(req): return go('/dashboard' if current(req) else '/login')
+    form = await req.form(); guard(req, form)
+    db = SessionLocal()
+    try:
+        academic_year_id = int(form.get('academic_year_id', '0'))
+        semester = int(form.get('semester_no', '0'))
+        teacher = int(form.get('teacher_id', '0'))
+        year_no = (semester + 1) // 2
+        if semester not in range(1, 9): raise HTTPException(400, 'Select semester 1–8')
+        year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first()
+        if not year: raise HTTPException(400, 'Select an academic year')
+        name = valid_name(form.get('name'))
+        if len(name) > 120: raise HTTPException(400, 'Subject name is too long')
+        reg = valid_name(form.get('regulation'))
+        regulation = db.query(models.Regulation).filter_by(regulation_name=reg).first()
+        if not regulation: raise HTTPException(400, 'Select an existing regulation')
+        if teacher and not db.query(models.Faculty).filter_by(teacher_id=teacher, is_active=True).first():
+            raise HTTPException(400, 'Faculty ID must belong to an active faculty member')
+        dup = db.query(models.Subject).filter_by(academic_year_id=academic_year_id, name=name, semester_no=semester).first()
+        if dup: raise HTTPException(409, 'This subject already exists in the selected year and semester')
+        course_type = str(form.get('course_type','major'))
+        course_format = str(form.get('course_format','theory'))
+        if course_type not in ('major','minor','other','value added') or course_format not in ('theory','practical','theory cum practical'):
+            raise HTTPException(400,'Invalid course type or format')
+        sub = models.Subject(name=name, regulation=reg, course_type=course_type, course_format=course_format,
+            year_no=year_no, semester_no=semester, academic_year_id=academic_year_id, faculty_id=teacher)
+        db.add(sub)
+        db.flush()
+        folder = subject_directory(db, sub)
+        if folder.exists():
+            raise HTTPException(409, 'Subject folder already exists; choose a different subject name')
+        # The same real filesystem structure used by backend uploads.
+        folder_names = ['Namelist', 'Course Files', 'Notes', 'Modules', 'CIA 1', 'Midsem', 'CIA 2', 'Endsem']
+        try:
+            extra = json.loads(regulation.subsequent_folders or '[]')
+            if isinstance(extra, list):
+                folder_names += [valid_name(x) for x in extra if isinstance(x, str)]
+        except (json.JSONDecodeError, HTTPException):
+            pass
+        created = False
+        try:
+            for folder_name in dict.fromkeys(folder_names):
+                (folder / folder_name).mkdir(parents=True, exist_ok=True)
+                created = True
+            db.commit()
+        except Exception:
+            db.rollback()
+            if created and folder.exists(): shutil.rmtree(folder)
+            raise
+        flash(req, f'Subject {name} added to {year.year_range} (Semester {semester})')
+    except (HTTPException, ValueError, OSError) as exc:
+        db.rollback()
+        flash(req, exc.detail if isinstance(exc, HTTPException) else str(exc), True)
+    finally:
+        db.close()
+    return go('/admin#subjects')
 
 
 @app.post('/admin/assign', include_in_schema=False)

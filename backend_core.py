@@ -64,6 +64,24 @@ STORAGE_ROOT = Path("department_storage")
 # Standard folders automatically created for every subject
 STANDARD_SUBFOLDERS = ["course files", "namelist", "midsem", "endsem"]
 
+import re
+
+def canonical_filename(subject, subfolder, extension, version):
+    """Uniform file name used by both API uploads and browser record edits.
+
+    Example: R2023_Namelist_Math_v1.pdf. Versions preserve earlier files.
+    """
+    course = subject.name.split(' - ', 1)[-1].strip()
+    if course.lower() in ('mathematics', 'maths'):
+        course = 'Math'
+    def compact(value):
+        return re.sub(r'[^A-Za-z0-9]+', '', str(value))[:70] or 'File'
+    ext = str(extension).lower()
+    if not re.fullmatch(r'\.(pdf|docx|pptx|xlsx|csv|jpg|jpeg|png|gif|zip)', ext):
+        raise HTTPException(status_code=400, detail='Unsupported file extension')
+    return f'{compact(subject.regulation)}_{compact(subfolder)}_{compact(course)}_v{int(version)}{ext}'
+
+
 
 # Dependency to get database session for each request
 def get_db():
@@ -953,24 +971,19 @@ async def upload_file(
 
     original_filename = file.filename
 
-    existing_file_record = db.query(models.FileVersion).filter(
+    # One version stream per subject/folder/extension makes file names deterministic.
+    file_suffix = Path(original_filename).suffix.lower()
+    if Path(original_filename).name != original_filename or not re.fullmatch(r"[\w .()\-]+\.(pdf|docx|pptx|xlsx|csv|jpg|jpeg|png|gif|zip)", original_filename, re.I):
+        raise HTTPException(status_code=400, detail="Invalid or unsupported upload filename")
+    existing = db.query(models.FileVersion).filter(
         models.FileVersion.subject_id == subject_id,
-        models.FileVersion.subfolder_name == subfolder_name,
-        models.FileVersion.file_name == original_filename
-    ).order_by(models.FileVersion.version_number.desc()).first()
-
-    next_version = 1
-    if existing_file_record:
-        next_version = existing_file_record.version_number + 1
-
-    file_stem = Path(original_filename).stem
-    file_suffix = Path(original_filename).suffix
-    formatted_filename = (
-        f"{ac_year.year_range}_Y{subject.year_no}_S{subject.semester_no}"
-        f"_{subject.name}_{subfolder_name}_{file_stem}_v{next_version}{file_suffix}"
-    )
-
+        models.FileVersion.subfolder_name == subfolder_name).all()
+    matching_versions = [r.version_number for r in existing if Path(r.file_name).suffix.lower() == file_suffix]
+    next_version = max(matching_versions, default=0) + 1
+    formatted_filename = canonical_filename(subject, subfolder_name, file_suffix, next_version)
     file_path = target_dir / formatted_filename
+    if file_path.exists():
+        raise HTTPException(status_code=409, detail="Upload name already exists")
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -978,7 +991,7 @@ async def upload_file(
     db_file_version = models.FileVersion(
         subject_id=subject_id,
         subfolder_name=subfolder_name,
-        file_name=original_filename,
+        file_name=formatted_filename,
         version_number=next_version,
         onedrive_path=str(file_path)
     )
