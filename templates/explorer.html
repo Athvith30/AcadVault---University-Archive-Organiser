@@ -4,13 +4,25 @@
  <div class="explorer-toolbar"><strong>▣ File Explorer</strong><span class="text-muted small">AcadVault / Academic Documents</span><a href="/upload" class="btn btn-sm btn-outline-primary">↑ Upload</a></div>
  <div class="explorer-layout">
    <aside class="explorer-tree" aria-label="Folder tree"><div class="tree-heading">Academic Years</div>
-   {% for yr in years.values()|unique|sort %}<details open><summary>📁 {{yr}}</summary>
-     {% for s in subjects if years.get(s.academic_year_id)==yr %}<a class="tree-subject {% if chosen and chosen.id==s.id %}selected{% endif %}" href="/explorer?subject_id={{s.id}}">📘 {{s.name}} <small>Sem {{s.semester_no}}</small></a>{% endfor %}
-   </details>{% endfor %}
+   {% for yr in academic_years if user.role == 'admin' or subjects|selectattr('academic_year_id','equalto',yr.id)|list %}
+   <details open><summary>📁 {{yr.year_range}}</summary>
+     <div class="tree-semesters">
+     {% for sem in range(1,9) %}
+       {% set sem_subjects = subjects|selectattr('academic_year_id','equalto',yr.id)|selectattr('semester_no','equalto',sem)|list %}
+       {% if user.role == 'admin' or sem_subjects %}
+       <details {% if chosen and chosen.academic_year_id == yr.id and chosen.semester_no == sem %}open{% endif %}>
+         <summary>📁 Semester {{sem}}</summary>
+         {% for s in sem_subjects %}<a class="tree-subject {% if chosen and chosen.id==s.id %}selected{% endif %}" href="/explorer?subject_id={{s.id}}">📘 {{s.name}}</a>{% endfor %}
+       </details>
+       {% endif %}
+     {% endfor %}
+     </div>
+   </details>
+   {% endfor %}
    </aside>
    <div class="explorer-main">
    {% if chosen %}
-     <div class="explorer-breadcrumb">📁 {{years.get(chosen.academic_year_id)}} <span>›</span> Year {{chosen.year_no}} <span>›</span> Semester {{chosen.semester_no}} <span>›</span> <strong>{{chosen.name}}</strong></div>
+     <div class="explorer-breadcrumb">📁 {{years.get(chosen.academic_year_id)}} <span>›</span> Semester {{chosen.semester_no}} <span>›</span> <strong>{{chosen.name}}</strong></div>
      {% if user.role == 'admin' %}<form method="post" action="/explorer/folder" class="folder-create"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="subject_id" value="{{chosen.id}}"><input class="form-control form-control-sm" name="name" placeholder="New folder name" required><button class="btn btn-sm btn-primary">+ New Folder</button></form>{% endif %}
      <div class="explorer-columns"><span>Name</span><span>Type</span><span>Actions</span></div>
      {% for folder in directory_list %}<details class="file-folder"><summary class="explorer-file-row"><span>📁 {{folder.name}}</span><span class="text-muted">Folder · {{folder.files|length}} files</span><span class="text-muted">Open / Close</span></summary><div class="folder-contents">

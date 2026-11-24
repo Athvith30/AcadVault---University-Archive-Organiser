@@ -185,7 +185,7 @@ def subject_directory(db, subject):
     year = db.query(models.AcademicYear).filter_by(id=subject.academic_year_id).first()
     if not year:
         raise HTTPException(404, 'Academic year not found')
-    return backend.STORAGE_ROOT / year.year_range / f'Year_{subject.year_no}' / f'Semester_{subject.semester_no}' / subject.name
+    return backend.subject_storage_dir(year.year_range, subject)
 
 
 def stored_file_path(record, subject, db):
@@ -221,7 +221,7 @@ def explorer(req: Request, subject_id: int = 0):
                 names.update(p.name for p in base.iterdir() if p.is_dir() and p.resolve().is_relative_to(base.resolve()))
             for name in sorted(names, key=str.casefold):
                 directory_list.append({'name': name, 'files': [x for x in versions if x.subfolder_name == name]})
-        return display(req, 'explorer.html', subjects=subs, years=years, chosen=chosen, directory_list=directory_list)
+        return display(req, 'explorer.html', subjects=subs, years=years, chosen=chosen, directory_list=directory_list, academic_years=db.query(models.AcademicYear).order_by(models.AcademicYear.year_range.desc()).all())
     finally: db.close()
 
 
@@ -237,7 +237,7 @@ async def add_explorer_folder(req: Request):
         name = str(form.get('name','')).strip()
         if not sub or not year or name in ('','.','..') or '/' in name or '\\' in name:
             raise HTTPException(400,'Invalid subject or folder name')
-        base = backend.STORAGE_ROOT / year.year_range / f'Year_{sub.year_no}' / f'Semester_{sub.semester_no}' / sub.name
+        base = subject_directory(db, sub)
         path = base / name
         if not path.resolve().is_relative_to(base.resolve()):
             raise HTTPException(400,'Invalid folder path')
@@ -442,7 +442,7 @@ def upload_page(req: Request):
         years = {y.id: y.year_range for y in db.query(models.AcademicYear).all()}
         location_options = {}
         for s in subs:
-            location = backend.STORAGE_ROOT / years.get(s.academic_year_id, '') / f'Year_{s.year_no}' / f'Semester_{s.semester_no}' / s.name
+            location = subject_directory(db, s)
             folders = sorted((c.name for c in location.iterdir() if c.is_dir()), key=str.casefold) if location.is_dir() else []
             location_options[str(s.id)] = folders
         return display(req, 'upload.html', subjects=subs, years=years, locations=json.dumps(location_options))
@@ -468,7 +468,7 @@ async def upload_action(req: Request):
         # File 1 does not validate these paths. Check them before calling its upload function.
         if subfolder in ('', '.', '..') or '/' in subfolder or '\\' in subfolder:
             raise HTTPException(status_code=400, detail='Invalid folder name')
-        valid_folder = backend.STORAGE_ROOT / ac_year.year_range / f'Year_{subj.year_no}' / f'Semester_{subj.semester_no}' / subj.name / subfolder
+        valid_folder = subject_directory(db, subj) / subfolder
         if not valid_folder.resolve().is_relative_to((backend.STORAGE_ROOT / ac_year.year_range).resolve()):
             raise HTTPException(status_code=400, detail='Invalid folder path')
         if not valid_folder.is_dir():

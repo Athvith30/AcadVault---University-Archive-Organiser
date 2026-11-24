@@ -62,7 +62,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 STORAGE_ROOT = Path("department_storage")
 
 # Standard folders automatically created for every subject
-STANDARD_SUBFOLDERS = ["course files", "namelist", "midsem", "endsem"]
+STANDARD_SUBFOLDERS = ["Namelist", "Course Files", "Notes", "Modules", "CIA 1", "Midsem", "CIA 2", "Endsem"]
 
 import re
 
@@ -167,7 +167,7 @@ def _apply_subject_files_to_dir(subject_dir: Path, entries: List[str]) -> List[s
     inside a subject directory across any year/semester.
     """
     applied: List[str] = []
-    course_files_dir = subject_dir / "course files"
+    course_files_dir = subject_dir / "Course Files"
     course_files_dir.mkdir(parents=True, exist_ok=True)
 
     for raw_entry in entries:
@@ -180,7 +180,7 @@ def _apply_subject_files_to_dir(subject_dir: Path, entries: List[str]) -> List[s
             target_file = course_files_dir / safe_name
             if not target_file.exists():
                 target_file.write_text("", encoding="utf-8")
-            applied.append(f"course files/{safe_name}")
+            applied.append(f"Course Files/{safe_name}")
         else:
             target_folder = subject_dir / safe_name
             target_folder.mkdir(parents=True, exist_ok=True)
@@ -190,9 +190,27 @@ def _apply_subject_files_to_dir(subject_dir: Path, entries: List[str]) -> List[s
 
 
 def ensure_base_year_folders(year_folder_path: Path):
-    """Automatically creates Year_1 through Year_4 folders for a new academic year."""
-    for year_num in range(1, 5):
-        (year_folder_path / f"Year_{year_num}").mkdir(parents=True, exist_ok=True)
+    """Create the eight semester folders directly inside a new academic year."""
+    for sem_no in range(1, 9):
+        (year_folder_path / f"Semester_{sem_no}").mkdir(parents=True, exist_ok=True)
+
+
+def subject_storage_dir(year_range: str, subject: models.Subject) -> Path:
+    """Use the new semester-first layout, while preserving old years' file paths."""
+    base = STORAGE_ROOT / year_range
+    previous = base / f"Year_{subject.year_no}" / f"Semester_{subject.semester_no}" / subject.name
+    current = base / f"Semester_{subject.semester_no}" / subject.name
+    # Older academic years retain their original directory structure.
+    return previous if previous.exists() and not current.exists() else current
+
+
+def copy_folder_structure(source: Path, target: Path) -> None:
+    """Copy nested directories only; student documents must not be duplicated."""
+    if not source.is_dir():
+        return
+    for directory in source.rglob('*'):
+        if directory.is_dir() and not directory.is_symlink():
+            (target / directory.relative_to(source)).mkdir(parents=True, exist_ok=True)
 
 
 def _pair_subjects_and_teachers(subjects_raw: str, teachers_raw: str) -> List[tuple]:
@@ -659,12 +677,12 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
     semester_slots = [
         (1, 1, reg_obj.year_1_sem_1_subjects, reg_obj.year_1_sem_1_teachers),
         (1, 2, reg_obj.year_1_sem_2_subjects, reg_obj.year_1_sem_2_teachers),
-        (2, 1, reg_obj.year_2_sem_1_subjects, reg_obj.year_2_sem_1_teachers),
-        (2, 2, reg_obj.year_2_sem_2_subjects, reg_obj.year_2_sem_2_teachers),
-        (3, 1, reg_obj.year_3_sem_1_subjects, reg_obj.year_3_sem_1_teachers),
-        (3, 2, reg_obj.year_3_sem_2_subjects, reg_obj.year_3_sem_2_teachers),
-        (4, 1, reg_obj.year_4_sem_1_subjects, reg_obj.year_4_sem_1_teachers),
-        (4, 2, reg_obj.year_4_sem_2_subjects, reg_obj.year_4_sem_2_teachers),
+        (2, 3, reg_obj.year_2_sem_1_subjects, reg_obj.year_2_sem_1_teachers),
+        (2, 4, reg_obj.year_2_sem_2_subjects, reg_obj.year_2_sem_2_teachers),
+        (3, 5, reg_obj.year_3_sem_1_subjects, reg_obj.year_3_sem_1_teachers),
+        (3, 6, reg_obj.year_3_sem_2_subjects, reg_obj.year_3_sem_2_teachers),
+        (4, 7, reg_obj.year_4_sem_1_subjects, reg_obj.year_4_sem_1_teachers),
+        (4, 8, reg_obj.year_4_sem_2_subjects, reg_obj.year_4_sem_2_teachers),
     ]
 
     created_subjects_info = []
@@ -694,12 +712,7 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
             db.commit()
             db.refresh(db_subject)
 
-            subject_dir = (
-                year_folder_path
-                / f"Year_{year_no}"
-                / f"Semester_{sem_no}"
-                / subj_name
-            )
+            subject_dir = year_folder_path / f"Semester_{sem_no}" / subj_name
 
             all_folders_to_create = list(STANDARD_SUBFOLDERS)
             for sf in reg_subsequent_folders:
@@ -722,36 +735,20 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
             applied_entries: List[str] = []
             if combined_entries:
                 applied_entries = _apply_subject_files_to_dir(subject_dir, combined_entries)
-            else:
-                old_subject_with_same_reg = db.query(models.Subject).filter(
-                    models.Subject.regulation == reg_name,
-                    models.Subject.name == subj_name,
-                    models.Subject.year_no == year_no,
-                    models.Subject.semester_no == sem_no,
-                    models.Subject.id != db_subject.id
-                ).first()
-
-                if old_subject_with_same_reg:
-                    old_ac_year = db.query(models.AcademicYear).filter(
-                        models.AcademicYear.id == old_subject_with_same_reg.academic_year_id
-                    ).first()
-                    if old_ac_year:
-                        old_subject_dir = (
-                            STORAGE_ROOT
-                            / old_ac_year.year_range
-                            / f"Year_{year_no}"
-                            / f"Semester_{sem_no}"
-                            / subj_name
-                        )
-                        if old_subject_dir.exists():
-                            for item in old_subject_dir.iterdir():
-                                if item.is_dir():
-                                    dest_sub = subject_dir / item.name
-                                    dest_sub.mkdir(parents=True, exist_ok=True)
-                                    for file_item in item.iterdir():
-                                        if file_item.is_file():
-                                            shutil.copy(file_item, dest_sub / file_item.name)
-                                            applied_entries.append(f"{item.name}/{file_item.name}")
+            # Reuse the folder/subfolder layout from the same regulation where it
+            # already exists, without copying any real uploaded documents.
+            old_subject_with_same_reg = db.query(models.Subject).filter(
+                models.Subject.regulation == reg_name,
+                models.Subject.name == subj_name,
+                models.Subject.semester_no == sem_no,
+                models.Subject.academic_year_id != new_academic_year.id
+            ).order_by(models.Subject.id.desc()).first()
+            if old_subject_with_same_reg:
+                old_ac_year = db.query(models.AcademicYear).filter_by(
+                    id=old_subject_with_same_reg.academic_year_id).first()
+                if old_ac_year:
+                    old_subject_dir = subject_storage_dir(old_ac_year.year_range, old_subject_with_same_reg)
+                    copy_folder_structure(old_subject_dir, subject_dir)
 
             created_subjects_info.append({
                 "name": subj_name,
@@ -769,7 +766,7 @@ def create_academic_year(data: AcademicYearCreateRequest, db: Session = Depends(
         "message": f"Academic Year {new_academic_year.year_range} created from regulation '{reg_name}'.",
         "year_range": new_academic_year.year_range,
         "regulation_name": reg_name,
-        "base_years_created": ["Year_1", "Year_2", "Year_3", "Year_4"],
+        "semester_folders_created": [f"Semester_{n}" for n in range(1, 9)],
         "subjects_created": created_subjects_info
     }
 
@@ -831,13 +828,7 @@ def get_faculty_upload_options(teacher_id: int, db: Session = Depends(get_db)):
         ).first()
         year_range = ac_year.year_range if ac_year else "Unknown"
 
-        subj_dir = (
-            STORAGE_ROOT
-            / year_range
-            / f"Year_{subj.year_no}"
-            / f"Semester_{subj.semester_no}"
-            / subj.name
-        )
+        subj_dir = subject_storage_dir(year_range, subj)
         available_subfolders = list(STANDARD_SUBFOLDERS)
         if subj_dir.exists():
             for child in subj_dir.iterdir():
@@ -959,14 +950,7 @@ async def upload_file(
             detail=f"Subject '{subject.name}' belongs to Semester_{subject.semester_no}, not Semester_{semester_no}."
         )
 
-    target_dir = (
-        STORAGE_ROOT
-        / ac_year.year_range
-        / f"Year_{subject.year_no}"
-        / f"Semester_{subject.semester_no}"
-        / subject.name
-        / subfolder_name
-    )
+    target_dir = subject_storage_dir(ac_year.year_range, subject) / subfolder_name
     target_dir.mkdir(parents=True, exist_ok=True)
 
     original_filename = file.filename
