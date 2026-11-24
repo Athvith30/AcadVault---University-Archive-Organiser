@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AcadVault</title><link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"><link rel="stylesheet" href="/static/live.css"></head>
+<body><nav class="sidebar"><div class="brand">AcadVault <small>Digital Archive</small></div>
+{% if user %}<div class="navcaption">MAIN</div><a href="/dashboard" class="nav-item">Dashboard</a><a href="/subjects" class="nav-item">Subjects</a><a href="/explorer" class="nav-item">Folder Explorer</a><a href="/search" class="nav-item">Search &amp; Edit Files</a><a href="/upload" class="nav-item">Upload Files</a>
+{% if user.role == 'admin' %}<div class="navcaption">ADMINISTRATION</div><a href="/file-status" class="nav-item">File Status</a><a href="/admin" class="nav-item">Manage Faculty &amp; Years</a>{% endif %}
+<div class="navcaption">OTHER</div><a href="/logout" class="nav-item">Logout</a>{% else %}<a href="/login" class="nav-item">Login</a>{% endif %}
+</nav><div class="content"><div class="topbar"><strong>AcadVault</strong><span>{% if user %}{{user.teacher_name or user.username}} · {{user.role|title}}{% else %}Academic Document Portal{% endif %}</span></div>
+{% if notice %}<div class="alert alert-{{ 'danger' if notice_error else 'success' }}" role="alert">{{notice}}</div>{% endif %}
+{% block content %}{% endblock %}</div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script></body></html>

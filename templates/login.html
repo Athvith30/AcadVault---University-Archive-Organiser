@@ -1,0 +1,14 @@
+{% extends 'base.html' %}{% block content %}
+<div class="auth"><div class="panel"><h1>Welcome to AcadVault</h1>
+<p>Sign in to access your academic documents.</p>
+<form action="/login" method="post" id="login-form"><input type="hidden" name="csrf" value="{{csrf}}">
+<label class="form-label">Username / Teacher ID</label><input class="form-control mb-3" id="login-username" name="username" required autocomplete="username">
+<label class="form-label">Password</label><input type="password" class="form-control mb-4" id="login-password" name="password" required autocomplete="current-password">
+<button class="btn btn-primary w-100">Sign In</button></form>
+<div class="mt-4"><h2 class="h6">Quick Access</h2><p class="small text-muted">Choose an account to sign in.</p>
+<div class="d-grid gap-2"><button type="button" class="btn btn-outline-secondary" onclick="quickLogin('admin','admin123')">Admin</button>
+<button type="button" class="btn btn-outline-secondary" onclick="quickLogin('101','alice123')">Prof. Alice · Faculty</button>
+<button type="button" class="btn btn-outline-secondary" onclick="quickLogin('102','bob123')">Prof. Bob · Faculty</button></div></div>
+</div></div>
+<script>function quickLogin(username,password){document.getElementById('login-username').value=username;document.getElementById('login-password').value=password;document.getElementById('login-form').requestSubmit();}</script>
+{% endblock %}
